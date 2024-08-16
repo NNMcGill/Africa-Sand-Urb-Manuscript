@@ -1,0 +1,199 @@
+---
+title: "AIC_Occupancy_Final"
+output: html_document
+date: "2024-06-17"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(unmarked)
+library(tidyverse)
+library(ggplot2)
+library(MuMIn)
+library(sjPlot)
+library(writexl)
+```
+
+## Get Necessary Data
+
+```{r}
+#READ-IN DETECTION DATA
+
+full_det_df <- read.csv("Full_dataset_mapping_June2024_clean.csv",sep = ",") 
+
+names(full_det_df) <- full_det_df[1,] #make first row header
+
+full_det_df <- full_det_df[-1,-1]  %>% rename(exp1 = 8, exp2 = 9, exp3 = 10) #drop first row and column + rename experience columns
+
+detection_history_df <-  dplyr::select(full_det_df, 2:4) 
+
+detection_history <-apply(detection_history_df, 2, function(x){as.numeric(as.character(x))})
+
+##___________________________________________________________________________________
+
+##GET COVARIATE DATA
+
+#observer
+detcp_df <-  dplyr::select(full_det_df, 5:7)
+detcp_df$person1 = as.factor(detcp_df$person1) #cols char-> numeric
+detcp_df$person2 = as.factor(detcp_df$person2) 
+detcp_df$person3 = as.factor(detcp_df$person3)
+detcp_matrix = data.matrix(detcp_df) #convert df to matrix
+row.names(detcp_matrix) <- full_det_df$celle_id #set dimnames
+colnames(detcp_matrix) <-  c("person1", "person2", "person3")
+#typeof(detcp_df) #check object type
+
+#experience
+detce_df <-  dplyr::select(full_det_df, 8:10)
+#unique(detce_df) #check values
+detce_df$exp1 = as.numeric(as.character(detce_df$exp1)) #convert col from char to numeric
+detce_df$exp2 = as.numeric(as.character(detce_df$exp2)) 
+detce_df$exp3 = as.numeric(as.character(detce_df$exp3)) 
+detce_matrix = data.matrix(detce_df) #convert df to matrix
+row.names(detce_matrix) <- full_det_df$celle_id #set dimnames
+colnames(detce_matrix) <-  c("exp1", "exp2", "exp3")
+#typeof(detce_df) #check object type
+
+experience <- detce_matrix
+observer <- detcp_matrix
+
+#read-in data
+
+#ELEVATION
+elevation_df <- read.csv("coords_el.csv", sep = ";")#missing data added
+elevation_site = elevation_df$elevation
+elevation_det_vector <- elevation_df$elevation %>% as.numeric(as.character(elevation_df$elevation)) 
+elevation_det_matrix <- matrix(c(elevation_det_vector, elevation_det_vector, elevation_det_vector), ncol = 3)
+
+#LANDCOVER
+
+#barren
+barren_df <- read.csv("mean_barren.csv") 
+barren_site = barren_df$V1
+barren_det_vector <- barren_df$V1 %>% as.numeric(as.character(barren_df$V1)) 
+barren_det_matrix = matrix(c(barren_det_vector, barren_det_vector, barren_det_vector), ncol = 3)
+
+#gdp
+gdp_df <- read.csv("gdp_final.csv") 
+gdp = gdp_df$gdp
+
+#percent_built_5
+percent_built_5_df <- read.csv("percent_built_final.csv") 
+percent_built_5 = percent_built_5_df$percent_built
+
+
+#percent_built_25
+percent_built_25_df <- read.csv("25_percent_built.csv") 
+percent_built_25 = percent_built_25_df$percent_built_25
+
+
+#percent_built_50
+percent_built_50_df <- read.csv("50_percent_built.csv") 
+percent_built_50 = percent_built_50_df$percent_built_50
+
+#Note: data collection for 100*100 gridcells in progress
+
+#percent_built_100
+percent_built_100_df <- read.csv("100_percent_built.csv") 
+percent_built_100 = percent_built_100_df$percent_built_100
+
+#degree_urbanization_5
+degree_urbanization_5_df <- read.csv("degree_urbanization_final.csv") 
+degree_urbanization_5 = degree_urbanization_5_df$degree_urbanization
+
+#Note: data collection for 25*25, 50*50, and 100*100 gridcells in progress
+
+#degree_urbanization_25
+degree_urbanization_25_df <- read.csv("25_degree_urbanization_final.csv") 
+degree_urbanization_25 = degree_urbanization_25_df$degree_urbanization_25
+
+#degree_urbanization_50
+degree_urbanization_50_df <- read.csv("50_degree_urbanization_final.csv") 
+degree_urbanization_50 = degree_urbanization_50_df$degree_urbanization_50
+
+#degree_urbanization_100
+degree_urbanization_100_df <- read.csv("100_degree_urbanization_final.csv") 
+degree_urbanization_100 = degree_urbanization_100_df$degree_urbanization_100
+
+```
+
+
+```{r, include=FALSE}
+
+#repalce 0 gdp with NA
+gdp[which(gdp==0)]<-NA
+
+#create site covariate dataframe
+site_cov <- data.frame(gdp, percent_built_5, percent_built_25, percent_built_50, percent_built_100, degree_urbanization_5, degree_urbanization_25, degree_urbanization_50, degree_urbanization_100)
+gdp[which(gdp==0)]
+#plot(degree_urbanization_25, degree_urbanization_50)
+
+#get unmarkedFramOccu
+sample.unmarkedFrame_cov <- unmarkedFrameOccu( y = as.matrix(detection_history),
+                                      obsCovs = list(experience = experience,
+                                                     observer = observer,
+                                                     elevation_d = elevation_det_matrix,
+                                                     barren_d = barren_det_matrix),
+                                      siteCovs = site_cov) 
+
+#S4 class for occupancy model data
+summary(sample.unmarkedFrame_cov)
+
+```
+
+## Lowest AIC Model (all) variables across all examined spatial levels)
+
+```{r}
+
+fmfull <- occu(formula = ~experience + observer + elevation_d + barren_d #detection
+                          ~  log(gdp)+ percent_built_25+ percent_built_5+ percent_built_50 + percent_built_100 + degree_urbanization_100 + degree_urbanization_50  + degree_urbanization_25 + degree_urbanization_5, #occupancy
+                data = sample.unmarkedFrame_cov)
+
+summary(fmfull)
+
+```
+
+
+```{r}
+
+#model selection with pdredge() 
+model_selection <- pdredge(fmfull)
+
+#select model with lowest AIC 
+best_model <- get.models(model_selection, subset = delta < 2)[[1]]
+
+#lowest AIC model summary
+summary(best_model)
+
+
+
+```
+
+```{r}
+gdp_effects_plot <- plotEffects(best_model, "state", "gdp")
+built5_effects_plot <- plotEffects(best_model, "state", "percent_built_5")
+built100_effects_plot <- plotEffects(best_model, "state", "percent_built_100")
+degree25_effects_plot <- plotEffects(best_model, "state", "degree_urbanization_25")
+degree50_effects_plot <- plotEffects(best_model, "state", "degree_urbanization_50")
+```
+
+
+## Top 10 Lowest AIC Models
+
+```{r}
+
+#get all models from model selection (calculated in chunk above)
+all_models <- get.models(model_selection, subset = TRUE)
+
+#sort models based on AIC
+sorted_models <- all_models[order(sapply(all_models, AIC))]
+
+#select the top 10 models
+top_10_models <- head(sorted_models, 10)
+
+#summaries of the top 10 models
+top10_summaries <- lapply(top_10_models, summary)
+
+```
+
